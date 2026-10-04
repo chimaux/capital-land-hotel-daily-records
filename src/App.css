@@ -1,0 +1,11 @@
+@layer base {
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body {
+    @apply font-body bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+  }
+  h1, h2, h3 { @apply tracking-tight; }
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type='number'] { -moz-appearance: textfield; }
+}
