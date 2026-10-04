@@ -5,11 +5,10 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { FaHotel, FaWallet } from 'react-icons/fa'
-import { FiArrowRight, FiCheckCircle, FiFileText, FiLock, FiLogOut, FiMoon, FiSun } from 'react-icons/fi'
+import { FiArrowRight, FiCheckCircle, FiFileText, FiLock, FiLogOut } from 'react-icons/fi'
 import { supabase } from '../supabaseClient'
 import { money, formatDateLong } from '../types'
 import type { PublicSummaryRow, PublicExpenseRow } from '../types'
-import { useTheme } from '../hooks/useTheme'
 
 const { Title, Text } = Typography
 
@@ -50,7 +49,7 @@ function friendlyError(...messages: (string | undefined)[]) {
 
 export function PublicPage({ onBack }: { onBack: () => void }) {
   const { token } = theme.useToken()
-  const { dark, toggle } = useTheme()
+  // const { dark, toggle } = useTheme()
   const [unlocked, setUnlocked] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -225,12 +224,12 @@ export function PublicPage({ onBack }: { onBack: () => void }) {
           <Text type="secondary" style={{ fontSize: 11 }}>Approved days only</Text>
         </div>
         <Space className="ml-auto" size={4}>
-          <Button
+          {/* <Button
             type="text"
             aria-label="Toggle dark mode"
             onClick={toggle}
             icon={dark ? <FiSun size={18} /> : <FiMoon size={18} />}
-          />
+          /> */}
           <Button icon={<FiLogOut />} onClick={lock}>Lock</Button>
         </Space>
       </header>

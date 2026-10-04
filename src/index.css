@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
 
 
@@ -7,6 +9,3 @@
   --mono: ui-monospace, Consolas, monospace;
 
 }
-
-
-

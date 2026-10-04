@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { LogoMark, CalendarIcon, ShieldCheckIcon, LogOutIcon, SunIcon, MoonIcon, MenuIcon, XIcon } from './Icons'
+import { LogoMark, CalendarIcon, ShieldCheckIcon, LogOutIcon, MenuIcon, XIcon } from './Icons'
 import { IconButton } from './ui'
-import { useTheme } from '../hooks/useTheme'
 import { ROLE_LABEL } from '../types'
 import type { Profile } from '../types'
 
@@ -15,7 +14,7 @@ interface Props {
 
 export function Layout({ profile, onSignOut, onGoPublic, children }: Props) {
   const [open, setOpen] = useState(false)
-  const { dark, toggle } = useTheme()
+
   const name = profile.display_name || ROLE_LABEL[profile.role]
   const initials = name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
 
@@ -78,11 +77,7 @@ export function Layout({ profile, onSignOut, onGoPublic, children }: Props) {
             {open ? <XIcon width={20} height={20} /> : <MenuIcon width={20} height={20} />}
           </IconButton>
           <h1 className="text-base font-semibold">Daily entry</h1>
-          <div className="ml-auto">
-            <IconButton onClick={toggle} aria-label="Toggle dark mode" title={dark ? 'Light mode' : 'Dark mode'}>
-              {dark ? <SunIcon width={18} height={18} /> : <MoonIcon width={18} height={18} />}
-            </IconButton>
-          </div>
+
         </header>
         <main className="flex-1 w-full max-w-6xl mx-auto p-4 sm:p-6">{children}</main>
       </div>
