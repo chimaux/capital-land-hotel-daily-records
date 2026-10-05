@@ -10,6 +10,7 @@ import { supabase } from '../supabaseClient'
 import { money, formatDateLong } from '../types'
 import type { PublicSummaryRow, PublicExpenseRow } from '../types'
 
+
 const { Title, Text } = Typography
 
 const n = (v: unknown) => Number(v) || 0
@@ -27,7 +28,6 @@ interface DeptTableRow {
 }
 
 /** Fetch one page of approved days (and the expenses for those same days). */
-
 async function fetchPage(pw: string, page: number, pageSize: number) {
   const args = { pw, p_limit: pageSize, p_offset: (page - 1) * pageSize }
   const [s, x] = await Promise.all([
@@ -36,9 +36,6 @@ async function fetchPage(pw: string, page: number, pageSize: number) {
   ])
   return { s, x }
 }
-
-
-
 
 function friendlyError(...messages: (string | undefined)[]) {
   const msg = messages.join(' ').toLowerCase()
@@ -49,7 +46,7 @@ function friendlyError(...messages: (string | undefined)[]) {
 
 export function PublicPage({ onBack }: { onBack: () => void }) {
   const { token } = theme.useToken()
-  // const { dark, toggle } = useTheme()
+
   const [unlocked, setUnlocked] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -224,12 +221,7 @@ export function PublicPage({ onBack }: { onBack: () => void }) {
           <Text type="secondary" style={{ fontSize: 11 }}>Approved days only</Text>
         </div>
         <Space className="ml-auto" size={4}>
-          {/* <Button
-            type="text"
-            aria-label="Toggle dark mode"
-            onClick={toggle}
-            icon={dark ? <FiSun size={18} /> : <FiMoon size={18} />}
-          /> */}
+
           <Button icon={<FiLogOut />} onClick={lock}>Lock</Button>
         </Space>
       </header>
@@ -301,6 +293,7 @@ function DayCard({ row, dayExpenses }: { row: PublicSummaryRow; dayExpenses: Pub
 
   const net = n(row.net)
   const netMinusPos = net - n(row.total_pos)
+
   return (
     <Card
       title={formatDateLong(row.entry_date)}
@@ -400,12 +393,32 @@ function DayCard({ row, dayExpenses }: { row: PublicSummaryRow; dayExpenses: Pub
       <Divider style={{ margin: '20px 0 12px' }} />
       <Space size={8} style={{ marginBottom: 12 }}>
         <FaWallet size={15} style={{ color: token.colorTextTertiary }} />
-        <Text strong>Cash position (as counted)</Text>
+        <Text strong>Cash position</Text>
       </Space>
+      <div style={{ marginBottom: 12, maxWidth: 280 }}>
+        <CashStat label="Account balance" value={n(row.account_balance)} />
+      </div>
       <Row gutter={[12, 12]}>
-        <Col xs={24} sm={8}><CashStat label="Account balance" value={n(row.account_balance)} /></Col>
-        <Col xs={24} sm={8}><CashStat label="Cash with Manager" value={n(row.cash_manager)} /></Col>
-        <Col xs={24} sm={8}><CashStat label="Cash with Chima" value={n(row.cash_chima)} /></Col>
+        <Col xs={24} sm={12}>
+          <PersonCash
+            title="Cash with Manager"
+            opening={n(row.manager_opening)}
+            received={n(row.manager_received)}
+            paid={n(row.manager_paid)}
+            closing={n(row.cash_manager)}
+            variance={n(row.manager_variance)}
+          />
+        </Col>
+        <Col xs={24} sm={12}>
+          <PersonCash
+            title="Cash with Chima"
+            opening={n(row.chima_opening)}
+            received={n(row.chima_received)}
+            paid={n(row.chima_paid)}
+            closing={n(row.cash_chima)}
+            variance={n(row.chima_variance)}
+          />
+        </Col>
       </Row>
     </Card>
   )
@@ -420,6 +433,37 @@ function CashStat({ label, value }: { label: string; value: number }) {
         value={money(value)}
         valueStyle={{ fontSize: 16, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}
       />
+    </Card>
+  )
+}
+
+/** One person's cash for the day: opening + received − paid out = closing. */
+function PersonCash({
+  title, opening, received, paid, closing, variance,
+}: {
+  title: string
+  opening: number
+  received: number
+  paid: number
+  closing: number
+  variance: number
+}) {
+  const { token } = theme.useToken()
+  const line = (label: string, value: number, bold = false) => (
+    <div className="flex justify-between py-1">
+      <Text strong={bold} type={bold ? undefined : 'secondary'}>{label}</Text>
+      <Text strong={bold} style={{ fontVariantNumeric: 'tabular-nums' }}>{money(value)}</Text>
+    </div>
+  )
+  return (
+    <Card size="small" styles={{ body: { background: token.colorFillQuaternary, borderRadius: token.borderRadius } }}>
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>{title}</Text>
+      {line('Opening', opening)}
+      {line('+ Received today', received)}
+      {line('− Paid out (cash)', paid)}
+      {variance !== 0 && line(variance < 0 ? 'Counted short' : 'Counted over', Math.abs(variance))}
+      <div style={{ borderTop: `1px solid ${token.colorBorder}`, margin: '6px 0 2px' }} />
+      {line('Closing balance', closing, true)}
     </Card>
   )
 }

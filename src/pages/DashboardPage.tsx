@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Button, Card, Col, DatePicker, Divider, Empty, Form, Input, InputNumber, List, Modal,
-  Row, Skeleton, Space, Statistic, Tag, Typography, theme,
+  Row, Select, Skeleton, Space, Statistic, Tag, Typography, theme,
 } from 'antd'
 import dayjs from 'dayjs'
 import { FaBed, FaGlassMartiniAlt, FaHandHoldingUsd, FaMoneyBillWave, FaUtensils, FaWallet } from 'react-icons/fa'
@@ -10,7 +10,7 @@ import type { IconType } from 'react-icons'
 import { supabase } from '../supabaseClient'
 import { TotalsCard } from '../components/TotalsCard'
 import { toast } from '../components/Toaster'
-import type { Profile, DepartmentEntry, Expense, CashPosition, DayApproval, Department } from '../types'
+import type { Profile, DepartmentEntry, Expense, CashPosition, CashBalance, DayApproval, Department, PaymentMethod } from '../types'
 import { DEPARTMENT_BY_ROLE, DEPARTMENT_LABEL, money, todayISO, yesterdayISO } from '../types'
 
 const { Text } = Typography
@@ -28,7 +28,20 @@ function isLateForDate(date: string) {
 type Amount = number | null
 
 interface DeptDraft { cash: Amount; pos: Amount; transfer: Amount; handed_manager: Amount; handed_chima: Amount }
-interface CashDraft { account_balance: Amount; cash_manager: Amount; cash_chima: Amount }
+interface CashDraft {
+  account_balance: Amount
+  cash_manager: Amount // counted cash with Manager (null = use expected closing)
+  cash_chima: Amount   // counted cash with Chima (null = use expected closing)
+  opening_manager: Amount // only used on the very first day
+  opening_chima: Amount
+}
+
+const emptyBalance = (date: string): CashBalance => ({
+  bal_date: date,
+  opening_manager: 0, received_manager: 0, paid_manager: 0, expected_manager: 0, closing_manager: 0,
+  opening_chima: 0, received_chima: 0, paid_chima: 0, expected_chima: 0, closing_chima: 0,
+  has_previous: true,
+})
 
 const num = (n: Amount) => n ?? 0
 const orNull = (n: number | undefined) => (n ? n : null)
@@ -78,9 +91,53 @@ function CashStat({ label, value }: { label: string; value: number }) {
   )
 }
 
+function LedgerLine({ label, value, sign, bold }: { label: string; value: number; sign?: '+' | '−'; bold?: boolean }) {
+  return (
+    <div className="flex justify-between py-1">
+      <Text strong={bold} type={bold ? undefined : 'secondary'}>{sign ? `${sign} ` : ''}{label}</Text>
+      <Text strong={bold} style={{ fontVariantNumeric: 'tabular-nums' }}>{money(value)}</Text>
+    </div>
+  )
+}
+
+/** One person's cash for the day: opening + received - paid out = closing. */
+function CashLedger({
+  title, opening, received, paid, expected, closing, children,
+}: {
+  title: string; opening: number; received: number; paid: number; expected: number; closing: number
+  children?: React.ReactNode
+}) {
+  const { token } = theme.useToken()
+  const variance = closing - expected
+  return (
+    <Card size="small" styles={{ body: { background: token.colorFillQuaternary, borderRadius: token.borderRadius } }}>
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>{title}</Text>
+      <LedgerLine label="Opening (from previous day)" value={opening} />
+      <LedgerLine label="Received today" value={received} sign="+" />
+      <LedgerLine label="Paid out (cash expenses)" value={paid} sign="−" />
+      <div style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, margin: '4px 0' }} />
+      <LedgerLine label="Expected closing" value={expected} />
+      {children && <div style={{ marginTop: 12 }}>{children}</div>}
+      <div style={{ borderTop: `1px solid ${token.colorBorder}`, margin: '8px 0 4px' }} />
+      <LedgerLine label="Closing balance" value={closing} bold />
+      {variance !== 0 && (
+        <Tag color={variance < 0 ? 'error' : 'warning'} style={{ marginTop: 4 }}>
+          Counted {variance < 0 ? 'short' : 'over'} by {money(Math.abs(variance))}
+        </Tag>
+      )}
+    </Card>
+  )
+}
+
 function ExpenseGroup({
-  title, items, approved, onDelete,
-}: { title: string; items: Expense[]; approved: boolean; onDelete: (e: Expense) => void }) {
+  title, items, approved, onDelete, canDelete,
+}: {
+  title: string
+  items: Expense[]
+  approved: boolean
+  onDelete: (e: Expense) => void
+  canDelete: (e: Expense) => boolean
+}) {
   if (items.length === 0) return null
   const subtotal = items.reduce((s, e) => s + e.amount, 0)
   return (
@@ -95,21 +152,30 @@ function ExpenseGroup({
         renderItem={(e) => (
           <List.Item
             key={e.id}
-            actions={[
-              <Button
-                key="del"
-                type="text"
-                danger
-                size="small"
-                aria-label={`Delete ${e.description}`}
-                icon={<FiTrash2 />}
-                disabled={approved}
-                onClick={() => onDelete(e)}
-              />,
-            ]}
+            actions={
+              canDelete(e)
+                ? [
+                  <Button
+                    key="del"
+                    type="text"
+                    danger
+                    size="small"
+                    aria-label={`Delete ${e.description}`}
+                    icon={<FiTrash2 />}
+                    disabled={approved}
+                    onClick={() => onDelete(e)}
+                  />,
+                ]
+                : []
+            }
           >
             <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-              <Text>{e.description}</Text>
+              <Space size={8}>
+                <Text>{e.description}</Text>
+                <Tag color={e.payment_method === 'transfer' ? 'blue' : undefined} style={{ marginInlineEnd: 0 }}>
+                  {e.payment_method === 'transfer' ? 'Transfer' : 'Cash'}
+                </Tag>
+              </Space>
               <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{money(e.amount)}</Text>
             </Space>
           </List.Item>
@@ -130,9 +196,11 @@ export function DashboardPage({ profile }: { profile: Profile }) {
   const [saving, setSaving] = useState<string | null>(null)
 
   const [deptDraft, setDeptDraft] = useState<DeptDraft>({ cash: null, pos: null, transfer: null, handed_manager: null, handed_chima: null })
-  const [cashDraft, setCashDraft] = useState<CashDraft>({ account_balance: null, cash_manager: null, cash_chima: null })
+  const [cashDraft, setCashDraft] = useState<CashDraft>({ account_balance: null, cash_manager: null, cash_chima: null, opening_manager: null, opening_chima: null })
   const [expDesc, setExpDesc] = useState('')
   const [expAmt, setExpAmt] = useState<Amount>(null)
+  const [expMethod, setExpMethod] = useState<PaymentMethod>('cash')
+  const [balance, setBalance] = useState<CashBalance>(emptyBalance(date))
   const [toDelete, setToDelete] = useState<Expense | null>(null)
   const [confirmReopen, setConfirmReopen] = useState(false)
 
@@ -144,13 +212,14 @@ export function DashboardPage({ profile }: { profile: Profile }) {
   async function loadAll(d: string, showSkeleton = true) {
     if (showSkeleton) setLoading(true)
     try {
-      const [en, ex, ca, ap] = await Promise.all([
+      const [en, ex, ca, ap, bl] = await Promise.all([
         supabase.from('department_entries').select('*').eq('entry_date', d),
         supabase.from('expenses').select('*, creator:profiles!created_by(role)').eq('entry_date', d).order('created_at'),
         supabase.from('cash_positions').select('*').eq('entry_date', d).maybeSingle(),
         supabase.from('day_approvals').select('*').eq('entry_date', d).maybeSingle(),
+        supabase.rpc('cash_balances', { upto: d }),
       ])
-      if (en.error || ex.error || ca.error || ap.error) throw new Error('load')
+      if (en.error || ex.error || ca.error || ap.error || bl.error) throw new Error('load')
       const ent = ((en.data as DepartmentEntry[]) || []).map((e) => ({
         ...e,
         cash: Number(e.cash),
@@ -164,6 +233,16 @@ export function DashboardPage({ profile }: { profile: Profile }) {
       const cp = ca.data as CashPosition | null
       setCashSaved(cp)
       setApproval((ap.data as DayApproval) || null)
+      const row = ((bl.data as any[]) || []).find((r) => r.bal_date === d)
+      const b = emptyBalance(d)
+      if (row) {
+        for (const k of Object.keys(b) as (keyof CashBalance)[]) {
+          if (k === 'bal_date') continue
+          if (k === 'has_previous') b.has_previous = !!row.has_previous
+          else (b as any)[k] = Number(row[k]) || 0
+        }
+      }
+      setBalance(b)
       const mine = ent.find((e) => e.department === myDept)
       setDeptDraft({
         cash: orNull(mine?.cash),
@@ -174,9 +253,11 @@ export function DashboardPage({ profile }: { profile: Profile }) {
       })
       setCashDraft({
         account_balance: orNull(cp ? Number(cp.account_balance) : 0),
-        // null = "use the automatic total from the departments"
+        // null = "no count entered, use the expected closing"
         cash_manager: cp?.cash_manager_override != null ? Number(cp.cash_manager_override) : null,
         cash_chima: cp?.cash_chima_override != null ? Number(cp.cash_chima_override) : null,
+        opening_manager: cp?.opening_manager_manual != null ? Number(cp.opening_manager_manual) : null,
+        opening_chima: cp?.opening_chima_manual != null ? Number(cp.opening_chima_manual) : null,
       })
     } catch {
       toast('Could not load this date. Check your connection.', 'error')
@@ -196,11 +277,9 @@ export function DashboardPage({ profile }: { profile: Profile }) {
   const otherExpenses = expenses.filter((e) => e.creator?.role !== 'chima' && e.creator?.role !== 'manager')
   const myEntry = entries.find((e) => e.department === myDept)
 
-  // Cash handed over by the departments (automatic), unless Chima has overridden it.
-  const autoManager = entries.reduce((s, e) => s + (e.handed_manager || 0), 0)
-  const autoChima = entries.reduce((s, e) => s + (e.handed_chima || 0), 0)
-  const shownManager = cashSaved?.cash_manager_override ?? autoManager
-  const shownChima = cashSaved?.cash_chima_override ?? autoChima
+  // Chima can remove any expense; the Manager can only remove ones he entered himself.
+  const canDeleteExpense = (e: Expense) => isChima || (profile.role === 'manager' && e.created_by === profile.id)
+
   const handedTotal = num(deptDraft.handed_manager) + num(deptDraft.handed_chima)
   const handedTooMuch = handedTotal > num(deptDraft.cash)
 
@@ -248,18 +327,28 @@ export function DashboardPage({ profile }: { profile: Profile }) {
         description: expDesc.trim(),
         amount,
         created_by: profile.id,
+        // Manager expenses are always paid from cash (also enforced in the database).
+        payment_method: isChima ? expMethod : 'cash',
       })
     )
     if (ok) {
       setExpDesc('')
       setExpAmt(null)
+      setExpMethod('cash')
     }
   }
 
   async function deleteExpense() {
     if (!toDelete?.id) return
     const id = toDelete.id
-    await run('del', 'Expense removed', async () => supabase.from('expenses').delete().eq('id', id))
+    await run('del', 'Expense removed', async () => {
+      const { data, error } = await supabase.from('expenses').delete().eq('id', id).select('id')
+      // A row blocked by security rules returns no error but deletes nothing.
+      if (!error && (!data || data.length === 0)) {
+        return { error: { message: 'You are not allowed to delete this expense.' } }
+      }
+      return { error }
+    })
     setToDelete(null)
   }
 
@@ -269,11 +358,13 @@ export function DashboardPage({ profile }: { profile: Profile }) {
         {
           entry_date: date,
           account_balance: num(cashDraft.account_balance),
-          // null = follow the departments' handover amounts automatically
+          // null = no count entered, closing balance = expected
           cash_manager_override: cashDraft.cash_manager,
           cash_chima_override: cashDraft.cash_chima,
-          cash_manager: cashDraft.cash_manager ?? autoManager,
-          cash_chima: cashDraft.cash_chima ?? autoChima,
+          // Opening balances are typed in only on the very first day; later days carry forward.
+          ...(balance.has_previous
+            ? {}
+            : { opening_manager_manual: cashDraft.opening_manager, opening_chima_manual: cashDraft.opening_chima }),
         },
         { onConflict: 'entry_date' }
       )
@@ -407,7 +498,7 @@ export function DashboardPage({ profile }: { profile: Profile }) {
                   >
                     <Form layout="vertical" disabled={approved}>
                       <Row gutter={12} align="bottom" style={{ marginBottom: 16 }}>
-                        <Col xs={24} sm={13}>
+                        <Col xs={24} sm={9}>
                           <Form.Item label="Description" style={{ marginBottom: 0 }}>
                             <Input
                               value={expDesc}
@@ -417,7 +508,7 @@ export function DashboardPage({ profile }: { profile: Profile }) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col xs={14} sm={6}>
+                        <Col xs={12} sm={5}>
                           <Form.Item label="Amount" style={{ marginBottom: 0 }}>
                             <InputNumber<number>
                               min={0}
@@ -430,7 +521,24 @@ export function DashboardPage({ profile }: { profile: Profile }) {
                             />
                           </Form.Item>
                         </Col>
-                        <Col xs={10} sm={5}>
+                        <Col xs={12} sm={5}>
+                          <Form.Item
+                            label="Paid from"
+                            style={{ marginBottom: 0 }}
+                            tooltip={isChima ? undefined : 'Manager expenses are always paid from cash'}
+                          >
+                            <Select<PaymentMethod>
+                              value={isChima ? expMethod : 'cash'}
+                              disabled={!isChima || approved}
+                              onChange={setExpMethod}
+                              options={[
+                                { value: 'cash', label: 'Cash' },
+                                { value: 'transfer', label: 'Transfer' },
+                              ]}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={5}>
                           <Button
                             type="primary"
                             block
@@ -459,9 +567,9 @@ export function DashboardPage({ profile }: { profile: Profile }) {
                       />
                     ) : (
                       <>
-                        <ExpenseGroup title="Entered by Chima" items={chimaExpenses} approved={approved} onDelete={setToDelete} />
-                        <ExpenseGroup title="Entered by Manager" items={managerExpenses} approved={approved} onDelete={setToDelete} />
-                        <ExpenseGroup title="Earlier entries (author not recorded)" items={otherExpenses} approved={approved} onDelete={setToDelete} />
+                        <ExpenseGroup title="Entered by Chima" items={chimaExpenses} approved={approved} onDelete={setToDelete} canDelete={canDeleteExpense} />
+                        <ExpenseGroup title="Entered by Manager" items={managerExpenses} approved={approved} onDelete={setToDelete} canDelete={canDeleteExpense} />
+                        <ExpenseGroup title="Earlier entries (author not recorded)" items={otherExpenses} approved={approved} onDelete={setToDelete} canDelete={canDeleteExpense} />
                         <div className="flex justify-between pt-3" style={{ borderTop: `1px solid ${token.colorBorder}` }}>
                           <Text strong>Total expenses</Text>
                           <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{money(totalExpenses)}</Text>
@@ -477,16 +585,50 @@ export function DashboardPage({ profile }: { profile: Profile }) {
                       : <Text type="warning" style={{ fontSize: 12 }}>Not counted yet</Text>}
                   >
                     {isChima ? (
-                      <>
-                        <Form layout="vertical" disabled={approved}>
-                          <Row gutter={12} style={{ marginBottom: 8 }}>
-                            <Col xs={24} sm={8}><MoneyField label="Current account balance" value={cashDraft.account_balance} onChange={(v) => setCashDraft({ ...cashDraft, account_balance: v })} /></Col>
-                            <Col xs={24} sm={8}><MoneyField label="Cash with Manager" placeholder={String(autoManager)} value={cashDraft.cash_manager} onChange={(v) => setCashDraft({ ...cashDraft, cash_manager: v })} /></Col>
-                            <Col xs={24} sm={8}><MoneyField label="Cash with Chima" placeholder={String(autoChima)} value={cashDraft.cash_chima} onChange={(v) => setCashDraft({ ...cashDraft, cash_chima: v })} /></Col>
-                          </Row>
-                        </Form>
-                        <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 16 }}>
-                          Automatic from departments: Manager {money(autoManager)}, Chima {money(autoChima)}. Leave a box empty to use the automatic amount.
+                      <Form layout="vertical" disabled={approved}>
+                        <Row gutter={12} style={{ marginBottom: 16 }}>
+                          <Col xs={24} sm={12}>
+                            <MoneyField label="Current account balance" value={cashDraft.account_balance} onChange={(v) => setCashDraft({ ...cashDraft, account_balance: v })} />
+                          </Col>
+                        </Row>
+                        <Row gutter={[12, 12]}>
+                          <Col xs={24} md={12}>
+                            <CashLedger
+                              title="Cash with Manager"
+                              opening={balance.opening_manager}
+                              received={balance.received_manager}
+                              paid={balance.paid_manager}
+                              expected={balance.expected_manager}
+                              closing={balance.closing_manager}
+                            >
+                              {!balance.has_previous && (
+                                <div style={{ marginBottom: 12 }}>
+                                  <MoneyField label="Opening balance (first day only)" value={cashDraft.opening_manager} onChange={(v) => setCashDraft({ ...cashDraft, opening_manager: v })} />
+                                </div>
+                              )}
+                              <MoneyField label="Counted cash (optional)" placeholder={String(balance.expected_manager)} value={cashDraft.cash_manager} onChange={(v) => setCashDraft({ ...cashDraft, cash_manager: v })} />
+                            </CashLedger>
+                          </Col>
+                          <Col xs={24} md={12}>
+                            <CashLedger
+                              title="Cash with Chima"
+                              opening={balance.opening_chima}
+                              received={balance.received_chima}
+                              paid={balance.paid_chima}
+                              expected={balance.expected_chima}
+                              closing={balance.closing_chima}
+                            >
+                              {!balance.has_previous && (
+                                <div style={{ marginBottom: 12 }}>
+                                  <MoneyField label="Opening balance (first day only)" value={cashDraft.opening_chima} onChange={(v) => setCashDraft({ ...cashDraft, opening_chima: v })} />
+                                </div>
+                              )}
+                              <MoneyField label="Counted cash (optional)" placeholder={String(balance.expected_chima)} value={cashDraft.cash_chima} onChange={(v) => setCashDraft({ ...cashDraft, cash_chima: v })} />
+                            </CashLedger>
+                          </Col>
+                        </Row>
+                        <Text type="secondary" style={{ display: 'block', fontSize: 12, margin: '12px 0 16px' }}>
+                          Leave "Counted cash" empty to use the expected closing. If you enter a count, it becomes the closing balance and carries to tomorrow. "Reset to automatic" clears both counts; click Save cash position afterwards to keep the change.
                         </Text>
                         <Space>
                           <Button type="primary" disabled={approved} loading={saving === 'cash'} onClick={saveCash}>
@@ -499,16 +641,36 @@ export function DashboardPage({ profile }: { profile: Profile }) {
                             Reset to automatic
                           </Button>
                         </Space>
-                      </>
+                      </Form>
                     ) : (
                       <>
+                        <div style={{ marginBottom: 12, maxWidth: 280 }}>
+                          <CashStat label="Current account balance" value={cashSaved ? Number(cashSaved.account_balance) : 0} />
+                        </div>
                         <Row gutter={[12, 12]}>
-                          <Col xs={24} sm={8}><CashStat label="Current account balance" value={cashSaved ? Number(cashSaved.account_balance) : 0} /></Col>
-                          <Col xs={24} sm={8}><CashStat label="Cash with Manager" value={shownManager} /></Col>
-                          <Col xs={24} sm={8}><CashStat label="Cash with Chima" value={shownChima} /></Col>
+                          <Col xs={24} md={12}>
+                            <CashLedger
+                              title="Cash with Manager"
+                              opening={balance.opening_manager}
+                              received={balance.received_manager}
+                              paid={balance.paid_manager}
+                              expected={balance.expected_manager}
+                              closing={balance.closing_manager}
+                            />
+                          </Col>
+                          <Col xs={24} md={12}>
+                            <CashLedger
+                              title="Cash with Chima"
+                              opening={balance.opening_chima}
+                              received={balance.received_chima}
+                              paid={balance.paid_chima}
+                              expected={balance.expected_chima}
+                              closing={balance.closing_chima}
+                            />
+                          </Col>
                         </Row>
                         <Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 12 }}>
-                          Cash amounts come from what each department handed over. Only Chima can change these figures.
+                          Received comes from what each department handed over. Only Chima can enter the account balance and counted cash.
                         </Text>
                       </>
                     )}

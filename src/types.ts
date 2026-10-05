@@ -19,6 +19,8 @@ export interface DepartmentEntry {
   updated_at?: string
 }
 
+export type PaymentMethod = 'cash' | 'transfer'
+
 export interface Expense {
   id?: number
   entry_date: string
@@ -27,6 +29,8 @@ export interface Expense {
   created_by?: string | null
   created_at?: string
   creator?: { role: Role } | null
+  /** 'cash' reduces the creator's cash balance; 'transfer' does not. Manager is always cash. */
+  payment_method?: PaymentMethod
 }
 
 export interface CashPosition {
@@ -34,9 +38,20 @@ export interface CashPosition {
   account_balance: number
   cash_manager: number
   cash_chima: number
-  /** Set only when Chima overrides the automatic totals; null = use department handovers. */
+  /** Cash Chima actually counted. null = no count, closing balance = expected. */
   cash_manager_override?: number | null
   cash_chima_override?: number | null
+  /** Typed in by Chima on the very first day only. */
+  opening_manager_manual?: number | null
+  opening_chima_manual?: number | null
+}
+
+/** One person's running cash for a day (from the cash_balances() database function). */
+export interface CashBalance {
+  bal_date: string
+  opening_manager: number; received_manager: number; paid_manager: number; expected_manager: number; closing_manager: number
+  opening_chima: number; received_chima: number; paid_chima: number; expected_chima: number; closing_chima: number
+  has_previous: boolean
 }
 
 export interface DayApproval {
@@ -104,7 +119,10 @@ export interface PublicSummaryRow {
   kitchen_cash: number; kitchen_pos: number; kitchen_transfer: number; kitchen_total: number
   total_cash: number; total_pos: number; total_transfer: number; total_income: number
   total_expenses: number; net: number
-  account_balance: number; cash_manager: number; cash_chima: number
+  account_balance: number
+  cash_manager: number; cash_chima: number // closing balances
+  manager_opening: number; manager_received: number; manager_paid: number; manager_variance: number
+  chima_opening: number; chima_received: number; chima_paid: number; chima_variance: number
 }
 
 export interface PublicExpenseRow {
