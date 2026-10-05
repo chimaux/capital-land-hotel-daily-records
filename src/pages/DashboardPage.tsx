@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Button, Card, Col, DatePicker, Divider, Empty, Form, Input, InputNumber, List, Modal,
-  Row, Select, Skeleton, Space, Statistic, Tag, Typography, theme,
+  Row, Select, Skeleton, Space, Statistic, Tag, Typography,
 } from 'antd'
 import dayjs from 'dayjs'
 import { FaBed, FaGlassMartiniAlt, FaHandHoldingUsd, FaMoneyBillWave, FaUtensils, FaWallet } from 'react-icons/fa'
@@ -14,6 +14,18 @@ import type { Profile, DepartmentEntry, Expense, CashPosition, CashBalance, DayA
 import { DEPARTMENT_BY_ROLE, DEPARTMENT_LABEL, money, todayISO, yesterdayISO } from '../types'
 
 const { Text } = Typography
+
+// Fixed colors (antd default light values) — no theme tokens.
+const COLOR = {
+  primary: '#1677ff',
+  success: '#52c41a',
+  fillQuaternary: 'rgba(0, 0, 0, 0.02)',
+  border: '#d9d9d9',
+  borderSecondary: '#f0f0f0',
+  textQuaternary: 'rgba(0, 0, 0, 0.25)',
+  radius: 6,
+}
+const SOFT_BODY = { background: COLOR.fillQuaternary, borderRadius: COLOR.radius }
 
 const DEPT_ICON: Record<Department, IconType> = {
   room: FaBed,
@@ -69,19 +81,17 @@ function MoneyField({
 }
 
 function CardHeading({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
-  const { token } = theme.useToken()
   return (
     <Space size={8}>
-      <span style={{ color: token.colorPrimary, display: 'inline-flex' }}>{icon}</span>
+      <span style={{ color: COLOR.primary, display: 'inline-flex' }}>{icon}</span>
       {children}
     </Space>
   )
 }
 
 function CashStat({ label, value }: { label: string; value: number }) {
-  const { token } = theme.useToken()
   return (
-    <Card size="small" styles={{ body: { background: token.colorFillQuaternary, borderRadius: token.borderRadius } }}>
+    <Card size="small" styles={{ body: SOFT_BODY }}>
       <Statistic
         title={<span style={{ fontSize: 12 }}>{label}</span>}
         value={money(value)}
@@ -107,18 +117,17 @@ function CashLedger({
   title: string; opening: number; received: number; paid: number; expected: number; closing: number
   children?: React.ReactNode
 }) {
-  const { token } = theme.useToken()
   const variance = closing - expected
   return (
-    <Card size="small" styles={{ body: { background: token.colorFillQuaternary, borderRadius: token.borderRadius } }}>
+    <Card size="small" styles={{ body: SOFT_BODY }}>
       <Text strong style={{ display: 'block', marginBottom: 8 }}>{title}</Text>
       <LedgerLine label="Opening (from previous day)" value={opening} />
       <LedgerLine label="Received today" value={received} sign="+" />
       <LedgerLine label="Paid out (cash expenses)" value={paid} sign="−" />
-      <div style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, margin: '4px 0' }} />
+      <div style={{ borderTop: `1px solid ${COLOR.borderSecondary}`, margin: '4px 0' }} />
       <LedgerLine label="Expected closing" value={expected} />
       {children && <div style={{ marginTop: 12 }}>{children}</div>}
-      <div style={{ borderTop: `1px solid ${token.colorBorder}`, margin: '8px 0 4px' }} />
+      <div style={{ borderTop: `1px solid ${COLOR.border}`, margin: '8px 0 4px' }} />
       <LedgerLine label="Closing balance" value={closing} bold />
       {variance !== 0 && (
         <Tag color={variance < 0 ? 'error' : 'warning'} style={{ marginTop: 4 }}>
@@ -186,7 +195,6 @@ function ExpenseGroup({
 }
 
 export function DashboardPage({ profile }: { profile: Profile }) {
-  const { token } = theme.useToken()
   const [date, setDate] = useState(yesterdayISO())
   const [entries, setEntries] = useState<DepartmentEntry[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -461,7 +469,7 @@ export function DashboardPage({ profile }: { profile: Profile }) {
 
                     <Divider style={{ margin: '4px 0 16px' }} />
                     <Space size={8} style={{ marginBottom: 12 }}>
-                      <FaHandHoldingUsd size={16} style={{ color: token.colorPrimary }} />
+                      <FaHandHoldingUsd size={16} style={{ color: COLOR.primary }} />
                       <Text strong>Cash with Manager and Chima</Text>
                     </Space>
                     <Row gutter={12} style={{ marginBottom: handedTooMuch ? 8 : 16 }}>
@@ -555,7 +563,7 @@ export function DashboardPage({ profile }: { profile: Profile }) {
 
                     {expenses.length === 0 ? (
                       <Empty
-                        image={<FaMoneyBillWave size={28} style={{ color: token.colorTextQuaternary }} />}
+                        image={<FaMoneyBillWave size={28} style={{ color: COLOR.textQuaternary }} />}
                         description={
                           <div>
                             <div>No expenses recorded yet</div>
@@ -570,7 +578,7 @@ export function DashboardPage({ profile }: { profile: Profile }) {
                         <ExpenseGroup title="Entered by Chima" items={chimaExpenses} approved={approved} onDelete={setToDelete} canDelete={canDeleteExpense} />
                         <ExpenseGroup title="Entered by Manager" items={managerExpenses} approved={approved} onDelete={setToDelete} canDelete={canDeleteExpense} />
                         <ExpenseGroup title="Earlier entries (author not recorded)" items={otherExpenses} approved={approved} onDelete={setToDelete} canDelete={canDeleteExpense} />
-                        <div className="flex justify-between pt-3" style={{ borderTop: `1px solid ${token.colorBorder}` }}>
+                        <div className="flex justify-between pt-3" style={{ borderTop: `1px solid ${COLOR.border}` }}>
                           <Text strong>Total expenses</Text>
                           <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{money(totalExpenses)}</Text>
                         </div>
@@ -716,8 +724,8 @@ export function DashboardPage({ profile }: { profile: Profile }) {
                                     display: 'inline-flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    background: c.ok ? token.colorSuccess : 'transparent',
-                                    border: c.ok ? 'none' : `1px solid ${token.colorBorder}`,
+                                    background: c.ok ? COLOR.success : 'transparent',
+                                    border: c.ok ? 'none' : `1px solid ${COLOR.border}`,
                                     color: c.ok ? '#fff' : 'transparent',
                                   }}
                                 >
