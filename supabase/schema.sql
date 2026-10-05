@@ -191,5 +191,5 @@ grant execute on function get_public_expenses(text) to anon;
 -- Run directly in the SQL Editor (bypasses RLS as the table owner), so this
 -- works before any staff account exists. Change the password from the app
 -- later via Manager/Chima → set_public_password, or re-run this line.
-insert into app_settings(key, value) values ('public_password_hash', crypt('hotel123', gen_salt('bf')))
+insert into app_settings(key, value) values ('public_password_hash', crypt('', gen_salt('bf')))
 on conflict (key) do update set value = excluded.value;
